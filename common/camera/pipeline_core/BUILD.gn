@@ -53,16 +53,17 @@ config("weak_ffmpeg") {
   defines = [ "DEVICE_USAGE_FFMPEG_ENABLE" ]
 }
 
-ohos_shared_library("camera_pipeline_core") {
+ohos_shared_library("usb_camera_pipeline_core") {
   sources = [
     "node/v4l2_source_node.cpp",
     "$camera_path_usb/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node/uvc_node.cpp",
     "$camera_path_usb/pipeline_core/pipeline_impl/src/strategy/config/config.c",
     "$camera_path_usb/pipeline_core/pipeline_impl/src/strategy/config/params.c",
-    "node/codec_node.cpp",
+    "$camera_path_usb/pipeline_core/src/node/codec_node.cpp",
     "$camera_path_usb/pipeline_core/src/node/exif_node.cpp",
     "$camera_path_usb/pipeline_core/src/node/face_node.cpp",
     "$camera_path_usb/pipeline_core/src/node/fork_node.cpp",
+    "$camera_path_usb/pipeline_core/src/node/node_utils.cpp",
     "$camera_path_usb/pipeline_core/src/node/scale_node.cpp",
     "$camera_path_vdi/dump/src/camera_dump.cpp",
     "$camera_path_vdi/pipeline_core/host_stream/src/host_stream_impl.cpp",
@@ -88,6 +89,7 @@ ohos_shared_library("camera_pipeline_core") {
     "$camera_path_vdi/pipeline_core/src/pipeline_core.cpp",
   ]
   include_dirs = [
+    "$camera_path_vdi/adapter/platform/v4l2/src/pipeline_core/nodes/v4l2_source_node",
     "$camera_path_vdi/utils/exif",
     "$camera_path_usb/../interfaces/include",
     "$camera_path_usb/../interfaces/hdi_ipc",
@@ -127,8 +129,7 @@ ohos_shared_library("camera_pipeline_core") {
     "$camera_path_usb/adapter/platform/v4l2/src/pipeline_core/nodes/v4l2_source_node",
     "$camera_path_usb/adapter/platform/v4l2/src/pipeline_core/nodes/uvc_node",
     "$camera_path_vdi/adapter/platform/v4l2/src/driver_adapter/include/",
-    "node",
-    "$third_path/libexif",
+    "src/node",
     "$camera_path_vdi/dump/include",
     "$camera_path_vdi/../interfaces",
   ]
@@ -140,18 +141,20 @@ ohos_shared_library("camera_pipeline_core") {
     "$camera_path_usb/device_manager:usb_camera_device_manager",
     "$camera_path_usb/metadata_manager:usb_camera_metadata_manager",
     "$camera_path_vdi/utils:peripheral_camera_utils",
-    "$third_path/libjpeg-turbo:turbojpeg_static",
   ]
 
   external_deps = [
     "c_utils:utils",
     "drivers_interface_camera:libbuffer_producer_sequenceable_1.0",
     "drivers_interface_camera:metadata",
+    "ffmpeg:libohosffmpeg",
     "graphic_surface:surface",
     "hdf_core:libhdf_host",
     "hdf_core:libhdf_utils",
     "hilog:libhilog",
     "ipc:ipc_single",
+    "libexif:libexif",
+    "libjpeg-turbo:turbojpeg_static",
   ]
 
   public_configs = [ ":pipe_config" ]
@@ -159,8 +162,6 @@ ohos_shared_library("camera_pipeline_core") {
   subsystem_name = "device_rpi4"
   part_name = "device_rpi4"
   if (device_usb_camera_ffmpeg_enable) {
-    deps += [ "$third_path/ffmpeg:libohosffmpeg" ]
-    include_dirs += [ "$third_path/ffmpeg" ]
     configs = [ ":weak_ffmpeg" ]
   }
 }

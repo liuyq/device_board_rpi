@@ -17,17 +17,7 @@ set -e
 PROJECT_ROOT=$(pwd)/
 PATCH_SRC_PATH=${PROJECT_ROOT}device/board/rpi/system_patch/
 
-# #chmod
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/build_bootimg.py
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/make_rpi_sdcard_image.py
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/build_kernel.sh
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/check_patch.sh
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/make_kernel.sh
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/make_dtb.mk
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/make_kernel_32.mk
-chmod 777 ${PROJECT_ROOT}device/board/rpi/common/kernel/make_kernel_64.mk
-
-cp -arfL ${PATCH_SRC_PATH}build/compile_standard_whitelist.json ${PROJECT_ROOT}build/compile_standard_whitelist.json
+python ${PATCH_SRC_PATH}whitelist.py
 cp -arfL ${PATCH_SRC_PATH}foundation/main_thread.cpp ${PROJECT_ROOT}foundation/ability/ability_runtime/frameworks/native/appkit/app/main_thread.cpp
 cp -arfL ${PATCH_SRC_PATH}base/appspawn_adapter.cpp ${PROJECT_ROOT}base/startup/appspawn/modules/common/appspawn_adapter.cpp
 cp -arfL ${PATCH_SRC_PATH}applications/ohos.build ${PROJECT_ROOT}applications/standard/hap/ohos.build

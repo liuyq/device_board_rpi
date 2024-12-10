@@ -82,7 +82,6 @@ repo forall -c 'git lfs pull'
 进入源码根目录，执行如下命令进行版本编译。
 第1步：执行编译前的脚本
 ```
-chmod 777 device/board/rpi/system_patch/system_patch.sh
 device/board/rpi/system_patch/system_patch.sh
 ```
 第2步：编译系统镜像
