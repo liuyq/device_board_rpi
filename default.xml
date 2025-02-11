@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
   <remote fetch="https://openharmony.gitee.com/openharmony/" name="origin" review="https://openharmony.gitee.com/openharmony/"/>
-  <default remote="origin" revision="OpenHarmony-5.0.0-Release" sync-j="4" />
+  <default remote="origin" revision="OpenHarmony-5.0.2-Release" sync-j="4" />
 
   <project name="inputmethod_imf" path="base/inputmethod/imf" groups="default,ohos:standard,ohos:system"/>
   <project name="ability_ability_lite" path="foundation/ability/ability_lite" groups="default,ohos:mini,ohos:small"/>
@@ -444,7 +444,7 @@
   <project name="accesscontrol_sandbox_manager" path="base/accesscontrol/sandbox_manager" groups="default,ohos:standard,ohos:system"/>
 
   <remote fetch="https://gitee.com/isrc_ohos" name="isrc" review="https://gitee.com/isrc_ohos"/>
-  <project name="device_board_rpi" path="device/board/rpi" groups="default,ohos:mini,ohos:small,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0-Release"/>
-  <project name="device_soc_broadcom" path="device/soc/broadcom" groups="default,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0-Release"/>
-  <project name="vendor_iscas" path="vendor/iscas" groups="default,ohos:mini,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0-Release"/>
+  <project name="device_board_rpi" path="device/board/rpi" groups="default,ohos:mini,ohos:small,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0.2-Release"/>
+  <project name="device_soc_broadcom" path="device/soc/broadcom" groups="default,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0.2-Release"/>
+  <project name="vendor_iscas" path="vendor/iscas" groups="default,ohos:mini,ohos:standard,ohos:chipset" remote="isrc" revision="OpenHarmony-5.0.2-Release"/>
 </manifest>
