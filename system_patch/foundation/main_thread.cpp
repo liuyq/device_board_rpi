@@ -97,6 +97,10 @@
 #include "nweb_helper.h"
 #endif
 
+#if defined(NWEB) && defined(NWEB_GRAPHIC)
+#include "nweb_adapter_helper.h"
+#endif
+
 #ifdef IMAGE_PURGEABLE_PIXELMAP
 #include "purgeable_resource_manager.h"
 #endif
@@ -127,7 +131,6 @@ constexpr int32_t DISTRIBUTE_TIME = 100;
 constexpr int32_t START_HIGH_SENSITIVE = 1;
 constexpr int32_t EXIT_HIGH_SENSITIVE = 2;
 constexpr int32_t UNSPECIFIED_USERID = -2;
-constexpr int32_t JS_ERROR_EXIT = -2;
 constexpr int32_t TIME_OUT = 120;
 constexpr int32_t DEFAULT_SLEEP_TIME = 100000;
 
@@ -147,6 +150,7 @@ constexpr char EVENT_KEY_HAPPEN_TIME[] = "HAPPEN_TIME";
 constexpr char EVENT_KEY_REASON[] = "REASON";
 constexpr char EVENT_KEY_JSVM[] = "JSVM";
 constexpr char EVENT_KEY_SUMMARY[] = "SUMMARY";
+constexpr char EVENT_KEY_PNAME[] = "PNAME";
 constexpr char EVENT_KEY_APP_RUNING_UNIQUE_ID[] = "APP_RUNNING_UNIQUE_ID";
 constexpr char DEVELOPER_MODE_STATE[] = "const.security.developermode.state";
 constexpr char PRODUCT_ASSERT_FAULT_DIALOG_ENABLED[] = "persisit.sys.abilityms.support_assert_fault_dialog";
@@ -167,8 +171,14 @@ const std::string SYSTEM_DEFAULT_FONTSIZE_SCALE = "1.0";
 const int32_t TYPE_RESERVE = 1;
 const int32_t TYPE_OTHERS = 2;
 
-extern "C" int DFX_SetAppRunningUniqueId(const char* appRunningId, size_t len) __attribute__((weak));
+#if defined(NWEB) && defined(NWEB_GRAPHIC)
+const std::string NWEB_SURFACE_NODE_NAME = "nwebPreloadSurface";
+const std::string BLANK_URL = "about:blank";
+constexpr uint32_t NWEB_SURFACE_SIZE = 1;
+constexpr int32_t PRELOAD_TASK_DELAY_TIME = 2000;  //millisecond
+#endif
 
+extern "C" int DFX_SetAppRunningUniqueId(const char* appRunningId, size_t len) __attribute__((weak));
 static bool initStatus;
 static std::string cacheDir;
 static std::string ddkcacheDir;
@@ -230,6 +240,8 @@ void MainThread::GetNativeLibPath(const BundleInfo &bundleInfo, const HspList &h
         libPath += (libPath.back() == '/') ? nativeLibraryPath : "/" + nativeLibraryPath;
         TAG_LOGD(AAFwkTag::APPKIT, "lib path = %{private}s", libPath.c_str());
         appLibPaths["default"].emplace_back(libPath);
+    } else {
+        TAG_LOGI(AAFwkTag::APPKIT, "nativeLibraryPath is empty");
     }
 
     for (auto &hapInfo : bundleInfo.hapModuleInfos) {
@@ -403,6 +415,13 @@ void MainThread::Attach()
         return;
     }
     mainThreadState_ = MainThreadState::ATTACH;
+    isDeveloperMode_ = system::GetBoolParameter(DEVELOPER_MODE_STATE, false);
+    auto bundleMgrHelper = DelayedSingleton<BundleMgrHelper>::GetInstance();
+    if (bundleMgrHelper == nullptr) {
+        TAG_LOGE(AAFwkTag::APPKIT, "The bundleMgrHelper is nullptr");
+        return;
+    }
+    bundleMgrHelper->PreConnect();
 }
 
 /**
@@ -442,9 +461,10 @@ std::shared_ptr<EventHandler> MainThread::GetMainHandler() const
  * @brief Schedule the foreground lifecycle of application.
  *
  */
-void MainThread::ScheduleForegroundApplication()
+bool MainThread::ScheduleForegroundApplication()
 {
     HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "ScheduleForegroundApplication");
     TAG_LOGD(AAFwkTag::APPKIT, "called");
     wptr<MainThread> weak = this;
     auto task = [weak]() {
@@ -461,10 +481,10 @@ void MainThread::ScheduleForegroundApplication()
     auto tmpWatchdog = watchdog_;
     if (tmpWatchdog == nullptr) {
         TAG_LOGE(AAFwkTag::APPKIT, "Watch dog is nullptr.");
-        return;
+    } else {
+        tmpWatchdog->SetBackgroundStatus(false);
     }
-    tmpWatchdog->SetBackgroundStatus(false);
-    tmpWatchdog = nullptr;
+    return true;
 }
 
 /**
@@ -475,6 +495,7 @@ void MainThread::ScheduleForegroundApplication()
 void MainThread::ScheduleBackgroundApplication()
 {
     TAG_LOGD(AAFwkTag::APPKIT, "called");
+    HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
     wptr<MainThread> weak = this;
     auto task = [weak]() {
         auto appThread = weak.promote();
@@ -576,13 +597,13 @@ void MainThread::ScheduleMemoryLevel(const int level)
 void MainThread::ScheduleHeapMemory(const int32_t pid, OHOS::AppExecFwk::MallocInfo &mallocInfo)
 {
     struct mallinfo mi = mallinfo();
-    int usmblks = mi.usmblks; // 当前从分配器中分配的总的堆内存大小
-    int uordblks = mi.uordblks; // 当前已释放给分配器，分配缓存了未释放给系统的内存大小
-    int fordblks = mi.fordblks; // 当前未释放的大小
-    int hblkhd = mi.hblkhd; // 堆内存的总共占用大小
+    uint64_t usmblks = mi.usmblks; // 当前从分配器中分配的总的堆内存大小
+    uint64_t uordblks = mi.uordblks; // 当前已释放给分配器，分配缓存了未释放给系统的内存大小
+    uint64_t fordblks = mi.fordblks; // 当前未释放的大小
+    uint64_t hblkhd = mi.hblkhd; // 堆内存的总共占用大小
     TAG_LOGD(AAFwkTag::APPKIT, "The pid of the app we want to dump memory allocation information is: %{public}i", pid);
-    TAG_LOGD(AAFwkTag::APPKIT, "usmblks: %{public}i, uordblks: %{public}i, fordblks: %{public}i, hblkhd: %{public}i",
-        usmblks, uordblks, fordblks, hblkhd);
+    TAG_LOGD(AAFwkTag::APPKIT, "usmblks: %{public}" PRIu64 ", uordblks: %{public}" PRIu64 ", "
+        "fordblks: %{public}" PRIu64 ", hblkhd: %{public}" PRIu64 "", usmblks, uordblks, fordblks, hblkhd);
     mallocInfo.usmblks = usmblks;
     mallocInfo.uordblks = uordblks;
     mallocInfo.fordblks = fordblks;
@@ -597,24 +618,19 @@ void MainThread::ScheduleHeapMemory(const int32_t pid, OHOS::AppExecFwk::MallocI
  */
 void MainThread::ScheduleJsHeapMemory(OHOS::AppExecFwk::JsHeapDumpInfo &info)
 {
-    TAG_LOGI(AAFwkTag::APPKIT, "pid: %{public}d, tid: %{public}d, needGc: %{public}d, needSnapshot: %{public}d",
-        info.pid, info.tid, info.needGc, info.needSnapshot);
-    auto app = applicationForDump_.lock();
-    if (app == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "app nullptr");
-        return;
-    }
-    auto &runtime = app->GetRuntime();
-    if (runtime == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "runtime nullptr");
-        return;
-    }
-    if (info.needSnapshot == true) {
-        runtime->DumpHeapSnapshot(info.tid, info.needGc);
-    } else {
-        if (info.needGc == true) {
-            runtime->ForceFullGC(info.tid);
+    TAG_LOGI(AAFwkTag::APPKIT, "pid: %{public}d, tid: %{public}d, needGc: %{public}d, needSnapshot: %{public}d,\n"
+        "needLeakobj: %{public}d", info.pid, info.tid, info.needGc, info.needSnapshot, info.needLeakobj);
+    wptr<MainThread> weak = this;
+    auto task = [weak, info]() {
+        auto appThread = weak.promote();
+        if (appThread == nullptr) {
+            TAG_LOGE(AAFwkTag::APPKIT, "appThread is nullptr");
+            return;
         }
+        appThread->HandleJsHeapMemory(info);
+    };
+    if (!mainHandler_->PostTask(task, "MainThread:HandleJsHeapMemory")) {
+        TAG_LOGE(AAFwkTag::APPKIT, "PostTask HandleJsHeapMemory failed");
     }
 }
 
@@ -642,6 +658,23 @@ void MainThread::ScheduleProcessSecurityExit()
 
 /**
  *
+ * @brief Schedule the application clear recovery page stack.
+ *
+ */
+void MainThread::ScheduleClearPageStack()
+{
+    TAG_LOGI(AAFwkTag::APPKIT, "ScheduleClearPageStack called");
+    if (applicationInfo_ == nullptr) {
+        TAG_LOGE(AAFwkTag::APPKIT, "applicationInfo_ is nullptr");
+        return;
+    }
+
+    auto bundleName = applicationInfo_->bundleName;
+    AppRecovery::GetInstance().ClearPageStack(bundleName);
+}
+
+/**
+ *
  * @brief Low the memory which used by application.
  *
  */
@@ -659,6 +692,7 @@ void MainThread::ScheduleLaunchApplication(const AppLaunchData &data, const Conf
 {
     HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
     TAG_LOGD(AAFwkTag::APPKIT, "called");
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "ScheduleLaunchApplication");
     wptr<MainThread> weak = this;
     auto task = [weak, data, config]() {
         auto appThread = weak.promote();
@@ -741,8 +775,7 @@ void MainThread::ScheduleLaunchAbility(const AbilityInfo &info, const sptr<IRemo
         tmpWatchdog = nullptr;
     }
     FreezeUtil::LifecycleFlow flow = { token, FreezeUtil::TimeoutState::LOAD };
-    std::string entry = std::to_string(AbilityRuntime::TimeUtil::SystemTimeMillisecond()) +
-        "; MainThread::ScheduleLaunchAbility; the load lifecycle.";
+    std::string entry = "MainThread::ScheduleLaunchAbility; the load lifecycle.";
     FreezeUtil::GetInstance().AddLifecycleEvent(flow, entry);
 
     wptr<MainThread> weak = this;
@@ -769,6 +802,8 @@ void MainThread::ScheduleLaunchAbility(const AbilityInfo &info, const sptr<IRemo
 void MainThread::ScheduleCleanAbility(const sptr<IRemoteObject> &token, bool isCacheProcess)
 {
     TAG_LOGD(AAFwkTag::APPKIT, "called, with isCacheProcess =%{public}d.", isCacheProcess);
+    FreezeUtil::GetInstance().DeleteAppLifecycleEvent(0);
+    FreezeUtil::GetInstance().DeleteLifecycleEvent(token);
     wptr<MainThread> weak = this;
     auto task = [weak, token, isCacheProcess]() {
         auto appThread = weak.promote();
@@ -902,6 +937,22 @@ void MainThread::HandleTerminateApplicationLocal()
     HandleCancelAssertFaultTask();
 }
 
+void MainThread::HandleJsHeapMemory(const OHOS::AppExecFwk::JsHeapDumpInfo &info)
+{
+    TAG_LOGD(AAFwkTag::APPKIT, "called");
+    if (mainHandler_ == nullptr) {
+        TAG_LOGE(AAFwkTag::APPKIT, "null mainHandler");
+        return;
+    }
+    auto app = applicationForDump_.lock();
+    if (app == nullptr) {
+        TAG_LOGE(AAFwkTag::APPKIT, "null app");
+        return;
+    }
+    auto helper = std::make_shared<DumpRuntimeHelper>(app);
+    helper->DumpJsHeap(info);
+}
+
 /**
  *
  * @brief Schedule the application process exit safely.
@@ -1013,6 +1064,8 @@ bool MainThread::InitResourceManager(std::shared_ptr<Global::Resource::ResourceM
         icu::Locale preferredLocale =
             icu::Locale::forLanguageTag(Global::I18n::PreferredLanguage::GetAppPreferredLanguage(), status);
         resConfig->SetPreferredLocaleInfo(preferredLocale);
+        AbilityRuntime::ApplicationConfigurationManager::GetInstance().SetLanguageSetLevel(
+            AbilityRuntime::SetLevel::Application);
     }
 #endif
     std::string colormode = config.GetItem(AAFwk::GlobalConfigurationKey::SYSTEM_COLORMODE);
@@ -1057,10 +1110,6 @@ void MainThread::OnStartAbility(const std::string &bundleName,
         loadPath = std::regex_replace(loadPath, pattern, std::string(LOCAL_CODE_PATH));
         TAG_LOGD(AAFwkTag::APPKIT, "ModuleResPath: %{public}s", loadPath.c_str());
         // getOverlayPath
-        auto res = GetOverlayModuleInfos(bundleName, entryHapModuleInfo.moduleName, overlayModuleInfos_);
-        if (res != ERR_OK) {
-            TAG_LOGW(AAFwkTag::APPKIT, "getOverlayPath failed");
-        }
         if (overlayModuleInfos_.size() == 0) {
             if (!resourceManager->AddResource(loadPath.c_str())) {
                 TAG_LOGE(AAFwkTag::APPKIT, "AddResource failed");
@@ -1290,6 +1339,7 @@ CJUncaughtExceptionInfo MainThread::CreateCjExceptionInfo(const std::string &bun
 void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, const Configuration &config)
 {
     HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "HandleLaunchApplication:begin");
     if (!CheckForHandleLaunchApplication(appLaunchData)) {
         TAG_LOGE(AAFwkTag::APPKIT, "CheckForHandleLaunchApplication failed");
         return;
@@ -1401,7 +1451,9 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
     std::shared_ptr<AbilityRuntime::ApplicationContext> applicationContext =
         AbilityRuntime::ApplicationContext::GetInstance();
     int32_t appIndex = appLaunchData.GetAppIndex();
+    std::string instanceKey = appLaunchData.GetInstanceKey();
     applicationContext->SetCurrentAppCloneIndex(appIndex);
+    applicationContext->SetCurrentInstanceKey(instanceKey);
     applicationContext->SetCurrentAppMode(static_cast<int32_t>(appInfo.multiAppMode.multiAppModeType));
     applicationContext->AttachContextImpl(contextImpl);
     auto appRunningId = appLaunchData.GetAppRunningUniqueId();
@@ -1412,9 +1464,7 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
     application_->SetApplicationContext(applicationContext);
 
 #ifdef SUPPORT_GRAPHICS
-    TAG_LOGD(
-        AAFwkTag::APPKIT, "HandleLaunchApplication cacheDir: %{public}s", applicationContext->GetCacheDir().c_str());
-        SetCacheDir(applicationContext->GetCacheDir());
+    SetCacheDir(applicationContext->GetCacheDir());
     // OHOS::EglSetCacheDir(applicationContext->GetCacheDir());
 #endif
 
@@ -1424,12 +1474,12 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
     if (ret != ERR_OK) {
         TAG_LOGE(AAFwkTag::APPKIT, "Get base shared bundle infos failed: %{public}d", ret);
     }
-    
+
     std::map<std::string, std::string> pkgContextInfoJsonStringMap;
     for (auto hapModuleInfo : bundleInfo.hapModuleInfos) {
         pkgContextInfoJsonStringMap[hapModuleInfo.moduleName] = hapModuleInfo.hapPath;
     }
-    
+
     AppLibPathMap appLibPaths {};
     GetNativeLibPath(bundleInfo, hspList, appLibPaths);
     bool isSystemApp = bundleInfo.applicationInfo.isSystemApp;
@@ -1486,6 +1536,8 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
             for (auto hapModuleInfo : bundleInfo.hapModuleInfos) {
                 options.hapModulePath[hapModuleInfo.moduleName] = hapModuleInfo.hapPath;
                 options.packageNameList[hapModuleInfo.moduleName] = hapModuleInfo.packageName;
+                options.aotCompileStatusMap[hapModuleInfo.moduleName] =
+                    static_cast<int32_t>(hapModuleInfo.aotCompileStatus);
             }
         }
         auto runtime = AbilityRuntime::Runtime::Create(options);
@@ -1525,7 +1577,9 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
             debugOption.perfCmd = perfCmd;
             runtime->StartProfiler(debugOption);
         } else {
-            runtime->StartDebugMode(debugOption);
+            if (isDeveloperMode_) {
+                runtime->StartDebugMode(debugOption);
+            }
         }
 
         std::vector<HqfInfo> hqfInfos = appInfo.appQuickFix.deployedAppqfInfo.hqfInfos;
@@ -1565,6 +1619,7 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
                     EVENT_KEY_REASON, errorObj.name,
                     EVENT_KEY_JSVM, JSVM_TYPE,
                     EVENT_KEY_SUMMARY, summary,
+                    EVENT_KEY_PNAME, processName,
                     EVENT_KEY_APP_RUNING_UNIQUE_ID, appRunningId);
                 ErrorObject appExecErrorObj = {
                     .name = errorObj.name,
@@ -1575,13 +1630,6 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
                 faultData.faultType = FaultDataType::JS_ERROR;
                 faultData.errorObject = appExecErrorObj;
                 DelayedSingleton<AppExecFwk::AppMgrClient>::GetInstance()->NotifyAppFault(faultData);
-                int result = HiSysEventWrite(HiviewDFX::HiSysEvent::Domain::FRAMEWORK, "PROCESS_KILL",
-                    HiviewDFX::HiSysEvent::EventType::FAULT, "PID", pid, "PROCESS_NAME", processName,
-                    "MSG", KILL_REASON);
-                TAG_LOGI(AAFwkTag::APPKIT, "hisysevent write result=%{public}d, send event [FRAMEWORK,PROCESS_KILL],"
-                    " pid=%{public}d, processName=%{public}s, msg=%{public}s", result, pid, processName.c_str(),
-                    KILL_REASON);
-    
                 if (ApplicationDataManager::GetInstance().NotifyUnhandledException(summary) &&
                     ApplicationDataManager::GetInstance().NotifyExceptionObject(appExecErrorObj)) {
                     return;
@@ -1590,9 +1638,20 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
                 TAG_LOGE(AAFwkTag::APPKIT,
                     "\n%{public}s is about to exit due to RuntimeError\nError type:%{public}s\n%{public}s",
                     bundleName.c_str(), errorObj.name.c_str(), summary.c_str());
+                bool foreground = false;
+                if (appThread->applicationImpl_ && appThread->applicationImpl_->GetState() ==
+                    ApplicationImpl::APP_STATE_FOREGROUND) {
+                    foreground = true;
+                }
+                int result = HiSysEventWrite(HiviewDFX::HiSysEvent::Domain::FRAMEWORK, "PROCESS_KILL",
+                    HiviewDFX::HiSysEvent::EventType::FAULT, "PID", pid, "PROCESS_NAME", processName,
+                    "MSG", KILL_REASON, "FOREGROUND", foreground);
+                TAG_LOGW(AAFwkTag::APPKIT, "hisysevent write result=%{public}d, send event [FRAMEWORK,PROCESS_KILL],"
+                    " pid=%{public}d, processName=%{public}s, msg=%{public}s, foreground=%{public}d", result, pid,
+                    processName.c_str(), KILL_REASON, foreground);
                 AAFwk::ExitReason exitReason = { REASON_JS_ERROR, errorObj.name };
                 AbilityManagerClient::GetInstance()->RecordAppExitReason(exitReason);
-                _exit(JS_ERROR_EXIT);
+                appThread->ScheduleProcessSecurityExit();
             };
             (static_cast<AbilityRuntime::JsRuntime&>(*runtime)).RegisterUncaughtExceptionHandler(uncaughtExceptionInfo);
 #ifdef CJ_FRONTEND
@@ -1664,11 +1723,10 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
         entryHapModuleInfo.hapPath.empty() ? entryHapModuleInfo.resourcePath : entryHapModuleInfo.hapPath;
     std::regex inner_pattern(std::string(ABS_CODE_PATH) + std::string(FILE_SEPARATOR) + bundleInfo.name);
     loadPath = std::regex_replace(loadPath, inner_pattern, LOCAL_CODE_PATH);
-    std::vector<OverlayModuleInfo> overlayModuleInfos;
-    auto res = GetOverlayModuleInfos(bundleInfo.name, moduleName, overlayModuleInfos);
+    auto res = GetOverlayModuleInfos(bundleInfo.name, moduleName, overlayModuleInfos_);
     std::vector<std::string> overlayPaths;
     if (res == ERR_OK) {
-        overlayPaths = GetAddOverlayPaths(overlayModuleInfos);
+        overlayPaths = GetAddOverlayPaths(overlayModuleInfos_);
     }
     std::unique_ptr<Global::Resource::ResConfig> resConfig(Global::Resource::CreateResConfig());
     int32_t appType;
@@ -1716,6 +1774,7 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
         TAG_LOGE(AAFwkTag::APPKIT, "applicationImpl_->PerformAppReady failed");
         return;
     }
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "HandleLaunchApplication:end");
     // L1 needs to add corresponding interface
     ApplicationEnvImpl *pAppEvnIml = ApplicationEnvImpl::GetInstance();
 
@@ -1749,6 +1808,106 @@ void MainThread::HandleLaunchApplication(const AppLaunchData &appLaunchData, con
         OHOS::NWeb::NWebHelper::TryPreReadLib(isFirstStartUpWeb, app->GetAppContext()->GetBundleCodeDir());
     }).detach();
 #endif
+#if defined(NWEB) && defined(NWEB_GRAPHIC)
+    if (appLaunchData.IsAllowedNWebPreload()) {
+        HandleNWebPreload();
+    }
+#endif
+    if (appLaunchData.IsNeedPreloadModule()) {
+        PreloadModule(entryHapModuleInfo, application_->GetRuntime());
+    }
+}
+
+#if defined(NWEB) && defined(NWEB_GRAPHIC)
+void MainThread::HandleNWebPreload()
+{
+    if (!mainHandler_) {
+        TAG_LOGE(AAFwkTag::APPKIT, "mainHandler is nullptr");
+        return;
+    }
+
+    auto task = [this]() {
+        auto ctx = AbilityRuntime::ApplicationContext::GetApplicationContext();
+        if (!ctx) {
+            TAG_LOGE(AAFwkTag::APPKIT, "get application context failed");
+            return;
+        }
+        NWeb::NWebHelper::Instance().SetBundlePath(ctx->GetBundleCodeDir());
+        if (!NWeb::NWebHelper::Instance().InitAndRun(true)) {
+            TAG_LOGE(AAFwkTag::APPKIT, "init NWebEngine failed");
+            return;
+        }
+        Rosen::RSSurfaceNodeConfig config;
+        config.SurfaceNodeName = NWEB_SURFACE_NODE_NAME;
+        preloadSurfaceNode_ = Rosen::RSSurfaceNode::Create(config, false);
+        auto surface = preloadSurfaceNode_->GetSurface();
+        if (!surface) {
+            TAG_LOGE(AAFwkTag::APPKIT, "preload surface is nullptr");
+            preloadSurfaceNode_ = nullptr;
+            return;
+        }
+        auto initArgs = std::make_shared<NWeb::NWebEngineInitArgsImpl>();
+        preloadNWeb_ = NWeb::NWebAdapterHelper::Instance().CreateNWeb(surface, initArgs,
+            NWEB_SURFACE_SIZE, NWEB_SURFACE_SIZE, false);
+        if (!preloadNWeb_) {
+            TAG_LOGE(AAFwkTag::APPKIT, "create preLoadNWeb failed");
+            return;
+        }
+        auto handler = std::make_shared<NWebPreloadHandlerImpl>();
+        preloadNWeb_->SetNWebHandler(handler);
+        preloadNWeb_->Load(BLANK_URL);
+        TAG_LOGI(AAFwkTag::APPKIT, "init NWeb success");
+    };
+
+    mainHandler_->PostIdleTask(task, "MainThread::NWEB_PRELOAD", PRELOAD_TASK_DELAY_TIME);
+    TAG_LOGI(AAFwkTag::APPKIT, "postIdleTask success");
+}
+#endif
+
+void MainThread::ProcessMainAbility(const AbilityInfo &info, const std::unique_ptr<AbilityRuntime::Runtime>& runtime)
+{
+    std::string srcPath(info.package);
+    if (!info.isModuleJson) {
+    /* temporary compatibility api8 + config.json */
+        srcPath.append("/assets/js/");
+        if (!info.srcPath.empty()) {
+            srcPath.append(info.srcPath);
+        }
+        srcPath.append("/").append(info.name).append(".abc");
+    } else {
+        if (info.srcEntrance.empty()) {
+            TAG_LOGE(AAFwkTag::UIABILITY, "empty srcEntrance");
+            return;
+        }
+        srcPath.append("/");
+        srcPath.append(info.srcEntrance);
+        srcPath.erase(srcPath.rfind("."));
+        srcPath.append(".abc");
+        TAG_LOGD(AAFwkTag::UIABILITY, "jsAbility srcPath: %{public}s", srcPath.c_str());
+    }
+
+    std::string moduleName(info.moduleName);
+    moduleName.append("::").append(info.name);
+    bool isEsmode = info.compileMode == AppExecFwk::CompileMode::ES_MODULE;
+    runtime->PreloadMainAbility(moduleName, srcPath, info.hapPath, isEsmode, info.srcEntrance);
+}
+
+void MainThread::PreloadModule(const AppExecFwk::HapModuleInfo &entryHapModuleInfo,
+    const std::unique_ptr<AbilityRuntime::Runtime>& runtime)
+{
+    TAG_LOGI(AAFwkTag::APPKIT, "preload module %{public}s", entryHapModuleInfo.moduleName.c_str());
+    auto callback = []() {};
+    bool isAsyncCallback = false;
+    application_->AddAbilityStage(entryHapModuleInfo, callback, isAsyncCallback);
+    if (isAsyncCallback) {
+        return;
+    }
+    for (const auto &info : entryHapModuleInfo.abilityInfos) {
+        if (info.name == entryHapModuleInfo.mainAbility) {
+            ProcessMainAbility(info, runtime);
+            return;
+        }
+    }
 }
 
 #ifdef ABILITY_LIBRARY_LOADER
@@ -1890,7 +2049,24 @@ void MainThread::HandleAbilityStage(const HapModuleInfo &abilityStage)
         return;
     }
 
-    application_->AddAbilityStage(abilityStage);
+    wptr<MainThread> weak = this;
+    auto callback = [weak]() {
+        auto appThread = weak.promote();
+        if (appThread == nullptr) {
+            TAG_LOGE(AAFwkTag::APPKIT, "appThread is nullptr");
+            return;
+        }
+        if (!appThread->appMgr_ || !appThread->applicationImpl_) {
+            TAG_LOGE(AAFwkTag::APPKIT, "appMgr_ is nullptr");
+            return;
+        }
+        appThread->appMgr_->AddAbilityStageDone(appThread->applicationImpl_->GetRecordId());
+    };
+    bool isAsyncCallback = false;
+    application_->AddAbilityStage(abilityStage, callback, isAsyncCallback);
+    if (isAsyncCallback) {
+        return;
+    }
 
     if (!appMgr_ || !applicationImpl_) {
         TAG_LOGE(AAFwkTag::APPKIT, "appMgr_ is nullptr");
@@ -2011,8 +2187,7 @@ void MainThread::HandleLaunchAbility(const std::shared_ptr<AbilityLocalRecord> &
     auto abilityToken = abilityRecord->GetToken();
     CHECK_POINTER_LOG(abilityToken, "abilityRecord->GetToken failed");
     FreezeUtil::LifecycleFlow flow = { abilityToken, FreezeUtil::TimeoutState::LOAD };
-    std::string entry = std::to_string(AbilityRuntime::TimeUtil::SystemTimeMillisecond()) +
-        "; MainThread::HandleLaunchAbility; the load lifecycle.";
+    std::string entry = "MainThread::HandleLaunchAbility; the load lifecycle.";
     FreezeUtil::GetInstance().AddLifecycleEvent(flow, entry);
 
     abilityRecordMgr_->SetToken(abilityToken);
@@ -2050,6 +2225,16 @@ void MainThread::HandleLaunchAbility(const std::shared_ptr<AbilityLocalRecord> &
         AbilityThread::AbilityThreadMain(application, abilityRecord, mainHandler_->GetEventRunner(), stageContext);
 #endif
     };
+#ifdef SUPPORT_SCREEN
+    Rosen::DisplayId defaultDisplayId = Rosen::DisplayManager::GetInstance().GetDefaultDisplayId();
+    Rosen::DisplayId displayId = defaultDisplayId;
+    if (abilityRecord->GetWant() != nullptr) {
+        displayId = abilityRecord->GetWant()->GetIntParam(
+            AAFwk::Want::PARAM_RESV_DISPLAY_ID, defaultDisplayId);
+    }
+    Rosen::DisplayManager::GetInstance().AddDisplayIdFromAms(displayId, abilityRecord->GetToken());
+    TAG_LOGD(AAFwkTag::APPKIT, "add displayId: %{public}" PRIu64, displayId);
+#endif
     bool isAsyncCallback = false;
     std::shared_ptr<AbilityRuntime::Context> stageContext = application_->AddAbilityStage(
         abilityRecord, callback, isAsyncCallback);
@@ -2087,17 +2272,10 @@ void MainThread::HandleCleanAbilityLocal(const sptr<IRemoteObject> &token)
     }
 
     std::shared_ptr<AbilityLocalRecord> record = abilityRecordMgr_->GetAbilityItem(token);
-    if (record == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "abilityRecord not found");
-        return;
-    }
+    CHECK_POINTER_TAG_LOG(record, AAFwkTag::APPKIT, "abilityRecord not found");
     std::shared_ptr<AbilityInfo> abilityInfo = record->GetAbilityInfo();
-    if (abilityInfo == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "record->GetAbilityInfo() failed");
-        return;
-    }
+    CHECK_POINTER_TAG_LOG(abilityInfo, AAFwkTag::APPKIT, "record->GetAbilityInfo() failed");
     TAG_LOGD(AAFwkTag::APPKIT, "ability name: %{public}s", abilityInfo->name.c_str());
-
     abilityRecordMgr_->RemoveAbilityRecord(token);
     application_->CleanAbilityStage(token, abilityInfo, false);
 #ifdef APP_ABILITY_USE_TWO_RUNNER
@@ -2135,29 +2313,16 @@ void MainThread::HandleCleanAbility(const sptr<IRemoteObject> &token, bool isCac
         TAG_LOGE(AAFwkTag::APPKIT, "should launch application first");
         return;
     }
-
-    if (token == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "token is null");
-        return;
-    }
-
+    CHECK_POINTER_TAG_LOG(token, AAFwkTag::APPKIT, "token is null");
     std::shared_ptr<AbilityLocalRecord> record = abilityRecordMgr_->GetAbilityItem(token);
-    if (record == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "abilityRecord not found");
-        return;
-    }
+    CHECK_POINTER_TAG_LOG(record, AAFwkTag::APPKIT, "abilityRecord not found");
     std::shared_ptr<AbilityInfo> abilityInfo = record->GetAbilityInfo();
-    if (abilityInfo == nullptr) {
-        TAG_LOGE(AAFwkTag::APPKIT, "record->GetAbilityInfo() failed");
-        return;
-    }
-
+    CHECK_POINTER_TAG_LOG(abilityInfo, AAFwkTag::APPKIT, "record->GetAbilityInfo() failed");
 #ifdef SUPPORT_GRAPHICS
     if (abilityInfo->type == AbilityType::PAGE && abilityInfo->isStageBasedModel) {
         AppRecovery::GetInstance().RemoveAbility(token);
     }
 #endif
-
     abilityRecordMgr_->RemoveAbilityRecord(token);
     application_->CleanAbilityStage(token, abilityInfo, isCacheProcess);
 #ifdef APP_ABILITY_USE_TWO_RUNNER
@@ -2186,6 +2351,7 @@ void MainThread::HandleCleanAbility(const sptr<IRemoteObject> &token, bool isCac
 void MainThread::HandleForegroundApplication()
 {
     HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "HandleForegroundApplication");
     TAG_LOGI(AAFwkTag::APPKIT, "called");
     if ((application_ == nullptr) || (appMgr_ == nullptr)) {
         TAG_LOGE(AAFwkTag::APPKIT, "handleForegroundApplication error!");
@@ -2193,6 +2359,7 @@ void MainThread::HandleForegroundApplication()
     }
 
     if (!applicationImpl_->PerformForeground()) {
+        FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "HandleForegroundApplication fail");
         TAG_LOGE(AAFwkTag::APPKIT, "applicationImpl_->PerformForeground() failed");
     }
 
@@ -2214,7 +2381,7 @@ void MainThread::HandleBackgroundApplication()
 {
     HITRACE_METER_NAME(HITRACE_TAG_APP, __PRETTY_FUNCTION__);
     TAG_LOGD(AAFwkTag::APPKIT, "start");
-
+    FreezeUtil::GetInstance().AddAppLifecycleEvent(0, "HandleBackgroundApplication");
     if ((application_ == nullptr) || (appMgr_ == nullptr)) {
         TAG_LOGE(AAFwkTag::APPKIT, "error");
         return;
@@ -3249,12 +3416,12 @@ void MainThread::AssertFaultResumeMainThreadDetection()
 
 void MainThread::HandleInitAssertFaultTask(bool isDebugModule, bool isDebugApp)
 {
-    if (!system::GetBoolParameter(PRODUCT_ASSERT_FAULT_DIALOG_ENABLED, false)) {
-        TAG_LOGD(AAFwkTag::APPKIT, "Unsupport assert fault dialog");
+    if (!isDeveloperMode_) {
+        TAG_LOGE(AAFwkTag::APPKIT, "Developer Mode is false");
         return;
     }
-    if (!system::GetBoolParameter(DEVELOPER_MODE_STATE, false)) {
-        TAG_LOGE(AAFwkTag::APPKIT, "Developer Mode is false");
+    if (!system::GetBoolParameter(PRODUCT_ASSERT_FAULT_DIALOG_ENABLED, false)) {
+        TAG_LOGD(AAFwkTag::APPKIT, "Unsupport assert fault dialog");
         return;
     }
     if (!isDebugApp) {

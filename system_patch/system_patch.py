@@ -28,11 +28,16 @@ def whitelist():
     with open(whitelist_path, 'w') as file:
         json.dump(data, file, indent=4)
 
+def copy(a,b):
+    shutil.copy(PATCH_SRC_PATH+a,PROJECT_ROOT+b)
 
 whitelist()
-shutil.copy(PATCH_SRC_PATH+"/foundation/main_thread.cpp",PROJECT_ROOT+"/foundation/ability/ability_runtime/frameworks/native/appkit/app/main_thread.cpp")
-shutil.copy(PATCH_SRC_PATH+"/base/appspawn_adapter.cpp",PROJECT_ROOT+"/base/startup/appspawn/modules/common/appspawn_adapter.cpp")
-shutil.copy(PATCH_SRC_PATH+"/applications/ohos.build",PROJECT_ROOT+"/applications/standard/hap/ohos.build")
-shutil.copy(PATCH_SRC_PATH+"/kernel/xhci.h",PROJECT_ROOT+"/kernel/linux/linux-5.10/drivers/usb/host/xhci.h")
+copy("/foundation/main_thread.cpp","/foundation/ability/ability_runtime/frameworks/native/appkit/app/main_thread.cpp")
+
+copy("/base/sensor_adapter_impl.cpp","/base/web/webview/ohos_adapter/sensor_adapter/src/sensor_adapter_impl.cpp")
+copy("/base/power_state_machine.cpp","/base/powermgr/power_manager/services/native/src/power_state_machine.cpp")
+copy("/base/screen_action.cpp","/base/powermgr/display_manager/state_manager/service/native/src/screen_action.cpp")
+
+copy("/kernel/xhci.h","/kernel/linux/linux-5.10/drivers/usb/host/xhci.h")
 
 print("finish")
