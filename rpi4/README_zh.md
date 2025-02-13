@@ -57,7 +57,7 @@ curl https://gitee.com/oschina/repo/raw/fork_flow/repo-py3 | sudo tee /usr/local
 注意：repo init不能在系统根目录下执行
 
 ```
-repo init -u https://gitee.com/zhengsenwen/manifest.git -b master -m devboard_rpi4b_4.1.xml --no-repo-verify
+repo init -u https://gitee.com/isrc_ohos/device_board_rpi.git -b OpenHarmony-5.0.2-Release  --no-repo-verify
 
 repo sync -c
 
@@ -82,16 +82,15 @@ repo forall -c 'git lfs pull'
 进入源码根目录，执行如下命令进行版本编译。
 第1步：执行编译前的脚本
 ```
-chmod 777 device/board/rpi/system_patch/system_patch.sh
-device/board/rpi/system_patch/system_patch.sh
+device/board/rpi/system_patch/system_patch.py
 ```
 第2步：编译系统镜像
 ```
-./build.sh --product-name rpi4 --ccache
+./build.sh --product-name rpi4 --ccache --no-prebuilt-sdk --gn-args allow_sanitize_debug=true
 ```
 第2步：对系统镜像打包
 ```
-./build.sh --product-name rpi4 --ccache --build-target rpi_image
+./build.sh --product-name rpi4 --ccache --no-prebuilt-sdk --gn-args allow_sanitize_debug=true --build-target rpi_image
 ```
 
 
